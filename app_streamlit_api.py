@@ -6,7 +6,13 @@ import altair as alt
 from datetime import datetime
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from dotenv import load_dotenv
-
+try:
+    import yfinance as yf
+except ImportError:
+    st.error("La bibliothèque 'yfinance' n'est pas installée. Veuillez l'installer en exécutant : pip install yfinance")
+    # Arrête l'exécution du script si la bibliothèque est essentielle
+    st.stop()
+ 
 load_dotenv()
 # Configuration proxy (réseau d'entreprise) via .env
 # Variables supportées: PROXY, HTTP_PROXY, HTTPS_PROXY, NO_PROXY
@@ -202,6 +208,21 @@ def main() -> None:
 		start_date = pd.to_datetime(date_range[0])
 		end_date = pd.to_datetime(date_range[1])
 		df_ticker = df_ticker.loc[(df_ticker.index >= start_date) & (df_ticker.index <= end_date)]
+  	# 1. Forcer la colonne 'Close' à être numérique. Les erreurs deviendront NaN.
+	df_ticker['Close'] = pd.to_numeric(df_ticker['Close'], errors='coerce')
+	# 2. (Recommandé) Supprimer les lignes où la conversion a échoué.
+	df_ticker.dropna(subset=['Close'], inplace=True)
+	
+ 	if df_ticker.empty:
+		st.warning("Aucune donnée disponible pour le ticker et la plage de dates sélectionnés. Veuillez ajuster vos paramètres.")
+		return  # Arrête l'exécution pour éviter l'erreur
+   	
+    # Code de débogage pour trouver les lignes non numériques
+	lignes_problematiques = df_ticker[~df_ticker['Close'].apply(lambda x: isinstance(x, (int, float)))]
+	if not lignes_problematiques.empty:
+		st.warning("Des données non numériques ont été trouvées dans la colonne 'Close' :")
+		st.dataframe(lignes_problematiques)
+	
 	st.subheader(f"Cours — {ticker}")
 	base_chart = plot_prices_with_actions(df_ticker)
 	actions_series: pd.Series | None = None
@@ -224,6 +245,11 @@ def main() -> None:
 			base_chart = alt.layer(base_chart, pred_chart)
 	st.altair_chart(base_chart, use_container_width=True)
 	if run_button:
+		# Le code ici ne s'exécutera que si df_ticker n'est pas vide
+		with st.spinner("Simulation en cours..."):
+			actions_series = sma_crossover_actions(df_ticker)
+		result = simulate_portfolio(df_ticker, actions_series)
+  
 		with st.spinner("Simulation en cours..."):
 			actions_series = sma_crossover_actions(df_ticker)
 		result = simulate_portfolio(df_ticker, actions_series)
